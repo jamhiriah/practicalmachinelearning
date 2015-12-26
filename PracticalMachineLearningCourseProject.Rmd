@@ -1,0 +1,153 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Jamhiriah Jilani"
+date: "19 December 2015"
+output: html_document
+---
+
+##Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+##Data 
+
+The training data for this project are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+##Objective or Goal
+1. To predict the manner in which the participants did the exercise. This is the "classe" variable in the training set. 
+2. Describe how the model is built. 
+3. How cross validation is used.
+4. What the expected out of sample error is and why made that choice. 
+5. The built prediction model will be used to predict 20 different test cases. 
+
+##Preliminary work
+### Setting up environment with libraries
+
+```{r}
+#libraries used
+library(pROC)
+library(caret)
+library(kernlab)
+library(ggplot2)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+
+```
+###Getting the data
+```{r}
+
+
+#assuming both files have been downloaded to current working directory
+training<-read.csv(file="pml-training.csv",na.strings=c("NA","#DIV/0!"))
+testing<-read.csv(file="pml-testing.csv",na.strings=c("NA","#DIV/0!"))
+```
+
+###Cross validation
+From the Original Training data, it will be split into 2 subsamples: myTraining (70%) and myTesting (30%). Our models will be fitted with myTraining data set, and tested on the myTesting data. Once the most accurate model is choosen, it will be tested on the original testing data set.
+
+```{r}
+#set seed
+set.seed(1234)
+inTrain <- createDataPartition(y=training$classe, p=0.7, list=FALSE)
+myTraining <- training[inTrain, ]
+myTesting <- training[-inTrain, ]
+dim(myTraining)
+dim(myTesting)
+```
+
+###Cleaning Data
+By replacing NA with 0, removal of near-zero-variance and unimportant variables, it would reduce possibility of errors from sample
+
+1. Replaced NA with 0
+```{r}
+myTraining[is.na(myTraining)] <- 0
+```
+
+2. Removed variables with Near-Zero-Variance
+```{r}
+myNZVresult<-nearZeroVar(myTraining,saveMetrics = TRUE)
+myNZVvar<-myNZVresult[myNZVresult$nzv=="TRUE",]
+#since i could not/ don't know how to get the column name list from myNZVvar. I export it to a csv file first. then import it back into a dataframe and read the 1st column to get the nzv variables list.
+write.csv(myNZVvar,file="mynzv.csv")
+myNZVvar<-read.csv(file="mynzv.csv",header = TRUE)
+myNZVvarchar<-as.character(myNZVvar$X)
+myTrainingClean<-myTraining[!(names(myTraining) %in% myNZVvarchar)]
+myTraining<-myTrainingClean #assign it back to original name
+```
+3.Removed variables “x”, “user_name”, and all the time related variables, such as “raw_timestamp_part_1” etc.
+```{r}
+myTraining<-myTraining[,-c(1:6)]
+dim(myTraining)
+```
+### Training and Testing
+
+Setting parameters for train
+```{r}
+cv3 = trainControl(method="cv",number=3,allowParallel=TRUE,verboseIter=TRUE)
+```
+
+Using RPart Method
+```{r}
+
+DTmodFitA<-train(classe~.,method="rpart",data=myTraining,trControl=cv3)
+DTpredictA<-predict(DTmodFitA,newdata=myTesting)
+confusionMatrix(DTpredictA,myTesting$classe)
+fancyRpartPlot(DTmodFitA$finalModel)
+```
+
+Using Random Forest Method
+```{r}
+DTmodFitB<-train(classe~.,method="rf",data=myTraining,trControl=cv3)
+DTpredictB<-predict(DTmodFitB,newdata=myTesting)
+confusionMatrix(DTpredictB,myTesting$classe)
+#cannot use fancyRpartPlot to plot RF decision tree.
+
+```
+Using Random Forest from randomForest package library  instead of caret. Just some additional testing on different package.
+```{r}
+library(randomForest)
+DTmodFitC <- randomForest(classe ~ .,data=myTraining)
+DTpredictC<-predict(DTmodFitC,newdata=myTesting)
+confusionMatrix(DTpredictC,myTesting$classe)
+#tree <- getTree(DTmodFitC,1,labelVar=TRUE)
+#tree
+```
+
+DTmodFitB & DTmodFitC which using Random Forests method yielded better Results compared to DTmodFitA which using CART via rpart method.
+Therefore, DTmodFitB & DTmodFitC will be used to predict on testing data.
+
+###Predicting on Testing Data using built models. 
+```{r}
+
+DTpredictB<-predict(DTmodFitB,testing)
+DTpredictB
+DTpredictC<-predict(DTmodFitC,testing)
+DTpredictC
+```
+Both selected models getting the same result
+
+##Generate 20 test results - using DTpredictC result
+```{r}
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(DTpredictC) 
+```
+
+##Conclusion:
+The built model with Random Forest method able to predict with best accuracy. The model was built step by step, started with data cleaning to reduce sample errors, cross-validation on data dan training controls and finally used to predict 20 different test cases.
+
